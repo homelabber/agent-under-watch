@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string"
+    },
+    "enableRule": {
+      "type": "bool",
+      "defaultValue": false
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2024-03-01",
+      "kind": "Scheduled",
+      "name": "[format('{0}/Microsoft.SecurityInsights/fa460a51-ded7-41d2-9111-dd95521821a5', parameters('workspaceName'))]",
+      "properties": {
+        "description": "Successful normalized Confidential or HighlyConfidential data access followed strictly later within 10 minutes by successful external tool submission in the same agent, session and nonempty correlation context.",
+        "severity": "High",
+        "queryFrequency": "PT15M",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "tactics": [],
+        "displayName": "AI Agent | Optional: sensitive-data access followed by a non-allowlisted tool submission",
+        "query": "let Agents = _GetWatchlist('AIAgentInventory')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId))\n    | where isnotempty(AgentId) | distinct AgentId;\nlet Allowed = _GetWatchlist('AIAgentAllowedDestinations')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId)), DestinationHost = tolower(trim_end(@'\\.+', tostring(DestinationHost)))\n    | where isnotempty(AgentId) and DestinationHost matches regex @'^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$'\n    | distinct AgentId, DestinationHost;\nlet ConfiguredAgents = Allowed | distinct AgentId;\nlet Events = AIAgentEvent_CL\n    | where TimeGenerated >= ago(1h) and SchemaVersion == '1.0'\n    | extend AgentId = tolower(AgentId)\n    | where isnotempty(AgentId) and isnotempty(SessionId) and isnotempty(EventId) and isnotempty(CorrelationId)\n    | summarize arg_max(TimeGenerated, *) by AgentId, EventId\n    | join kind=inner Agents on AgentId\n    | join kind=inner ConfiguredAgents on AgentId;\nlet Reads = Events | where EventType == 'DataAccess' and Outcome == 'Succeeded'\n    | where DataClassification in ('Confidential', 'HighlyConfidential')\n    | project AgentId, SessionId, CorrelationId, ReadAt = TimeGenerated, ReadId = EventId, DataClassification;\nlet Sends = Events | where EventType == 'ExternalSubmission' and Outcome == 'Succeeded' and isnotempty(ToolName)\n    | extend DestinationHost = tolower(trim_end(@'\\.+', DestinationHost))\n    | where DestinationHost matches regex @'^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$'\n    | join kind=leftanti Allowed on AgentId, DestinationHost\n    | project AgentId, SessionId, CorrelationId, SendAt = TimeGenerated, SendId = EventId, ActorUPN = tolower(ActorUPN), ToolName, DestinationHost;\nReads\n| join kind=inner Sends on AgentId, SessionId, CorrelationId\n| where SendAt > ReadAt and SendAt <= ReadAt + 10m and SendId != ReadId\n| summarize arg_max(ReadAt, *) by AgentId, SessionId, CorrelationId, SendId\n| project TimeGenerated = SendAt, AgentId, ActorUPN, SessionId, DestinationHost,\n          Evidence = tostring(bag_pack('readEventId', ReadId, 'readAt', ReadAt, 'submissionEventId', SendId, 'classification', DataClassification, 'toolName', ToolName, 'destinationHost', DestinationHost, 'correlationId', CorrelationId, 'assessment', 'Shared trace; transferred content not proven')),\n          CorrelationQuality = 'heuristic', AccountCustomEntity = ActorUPN\n",
+        "enabled": "[parameters('enableRule')]",
+        "suppressionDuration": "PT1H",
+        "suppressionEnabled": false,
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": false
+          }
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "SingleAlert"
+        },
+        "customDetails": {
+          "AgentId": "AgentId",
+          "CorrelationQuality": "CorrelationQuality"
+        }
+      }
+    }
+  ]
+}

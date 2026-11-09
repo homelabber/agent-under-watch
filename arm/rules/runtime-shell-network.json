@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string"
+    },
+    "enableRule": {
+      "type": "bool",
+      "defaultValue": false
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2024-03-01",
+      "kind": "Scheduled",
+      "name": "[format('{0}/Microsoft.SecurityInsights/f045a8e8-72ab-42b4-ab94-f5e23330ae03', parameters('workspaceName'))]",
+      "properties": {
+        "description": "A registered endpoint runtime directly creates a selected shell or script host, followed within 10 minutes by a successful connection from that exact child process instance.",
+        "severity": "Medium",
+        "queryFrequency": "PT15M",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "tactics": [
+          "Execution"
+        ],
+        "displayName": "AI Agent | Registered agent runtime spawns a shell with network activity",
+        "query": "let Agents = _GetWatchlist('AIAgentInventory')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId))\n    | where isnotempty(AgentId) | distinct AgentId;\nlet Runtimes = _GetWatchlist('AIAgentRuntimeInventory')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId)), DeviceId = tolower(tostring(DeviceId)),\n              RuntimeFile = tolower(tostring(ProcessFileName)), RuntimeFolder = tolower(tostring(ProcessFolderPath))\n    | where isnotempty(AgentId) and isnotempty(DeviceId) and isnotempty(RuntimeFile) and isnotempty(RuntimeFolder)\n    | join kind=inner Agents on AgentId\n    | distinct AgentId, DeviceId, RuntimeFile, RuntimeFolder;\nlet Children = DeviceProcessEvents\n    | where TimeGenerated >= ago(1h) and ActionType == 'ProcessCreated'\n    | where FileName in~ ('powershell.exe', 'pwsh.exe', 'cmd.exe', 'wscript.exe', 'cscript.exe', 'mshta.exe', 'bash.exe', 'sh.exe')\n    | extend DeviceId = tolower(DeviceId), RuntimeFile = tolower(InitiatingProcessFileName), RuntimeFolder = tolower(InitiatingProcessFolderPath)\n    | join kind=inner Runtimes on DeviceId, RuntimeFile, RuntimeFolder\n    | project AgentId, DeviceId, DeviceName, ChildAt = TimeGenerated, ChildPid = ProcessId,\n              ChildCreated = ProcessCreationTime, ChildFile = FileName, ActorUPN = tolower(AccountUpn), ProcessReportId = ReportId\n    | where isnotnull(ChildCreated)\n    | distinct AgentId, DeviceId, DeviceName, ChildAt, ChildPid, ChildCreated, ChildFile, ActorUPN, ProcessReportId;\nlet Connections = DeviceNetworkEvents\n    | where TimeGenerated >= ago(1h) and ActionType == 'ConnectionSuccess'\n    | project DeviceId = tolower(DeviceId), ChildPid = InitiatingProcessId, ChildCreated = InitiatingProcessCreationTime,\n              NetworkAt = TimeGenerated, RemoteIP, RemotePort, RemoteUrl, NetworkReportId = ReportId;\nChildren\n| join kind=inner Connections on DeviceId, ChildPid, ChildCreated\n| where NetworkAt >= ChildAt and NetworkAt <= ChildAt + 10m\n| summarize arg_min(NetworkAt, *) by AgentId, DeviceId, ChildPid, ChildCreated, ProcessReportId\n| project TimeGenerated = NetworkAt, AgentId, ActorUPN, DeviceId,\n          Evidence = tostring(bag_pack('processReportId', ProcessReportId, 'networkReportId', NetworkReportId, 'childFile', ChildFile, 'childPid', ChildPid, 'childCreated', ChildCreated, 'remoteHost', RemoteUrl, 'remoteIP', RemoteIP, 'remotePort', RemotePort)),\n          CorrelationQuality = 'heuristic', HostCustomEntity = DeviceName, AccountCustomEntity = ActorUPN, IPCustomEntity = RemoteIP\n",
+        "enabled": "[parameters('enableRule')]",
+        "suppressionDuration": "PT1H",
+        "suppressionEnabled": false,
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": false
+          }
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "SingleAlert"
+        },
+        "customDetails": {
+          "AgentId": "AgentId",
+          "CorrelationQuality": "CorrelationQuality"
+        }
+      }
+    }
+  ]
+}

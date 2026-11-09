@@ -1,0 +1,15 @@
+let Agents = _GetWatchlist('AIAgentInventory')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId))
+    | where isnotempty(AgentId) | distinct AgentId;
+PowerPlatformAdminActivity
+| where TimeGenerated >= ago(1h)
+| where EventOriginalType == 'BotUpdateOperation-BotAuthUpdate' and EventResult == 'Succeeded'
+| extend AgentId = tolower(coalesce(tostring(Properties.BotId), tostring(PropertyCollection.BotId))),
+         ActorUPN = iff(tostring(ActorName) contains '@', tolower(tostring(ActorName)), '')
+| where isnotempty(AgentId) and isnotempty(EventOriginalUid)
+| summarize arg_max(TimeGenerated, *) by EventOriginalUid
+| join kind=inner Agents on AgentId
+| project TimeGenerated, AgentId, ActorUPN, EnvironmentId,
+          Evidence = tostring(bag_pack('eventId', EventOriginalUid, 'operation', EventOriginalType, 'actorId', ActorUserId, 'assessment', 'Authentication configuration changed; weakening not established')),
+          CorrelationQuality = 'configuration', AccountCustomEntity = ActorUPN

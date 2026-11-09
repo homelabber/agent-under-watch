@@ -1,0 +1,32 @@
+let Agents = _GetWatchlist('AIAgentInventory')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId))
+    | where isnotempty(AgentId) | distinct AgentId;
+let Allowed = _GetWatchlist('AIAgentAllowedDestinations')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId)), DestinationHost = tolower(trim_end(@'\.+', tostring(DestinationHost)))
+    | where isnotempty(AgentId) and DestinationHost matches regex @'^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$'
+    | distinct AgentId, DestinationHost;
+let ConfiguredAgents = Allowed | distinct AgentId;
+let Events = AIAgentEvent_CL
+    | where TimeGenerated >= ago(1h) and SchemaVersion == '1.0'
+    | extend AgentId = tolower(AgentId)
+    | where isnotempty(AgentId) and isnotempty(SessionId) and isnotempty(EventId) and isnotempty(CorrelationId)
+    | summarize arg_max(TimeGenerated, *) by AgentId, EventId
+    | join kind=inner Agents on AgentId
+    | join kind=inner ConfiguredAgents on AgentId;
+let Reads = Events | where EventType == 'DataAccess' and Outcome == 'Succeeded'
+    | where DataClassification in ('Confidential', 'HighlyConfidential')
+    | project AgentId, SessionId, CorrelationId, ReadAt = TimeGenerated, ReadId = EventId, DataClassification;
+let Sends = Events | where EventType == 'ExternalSubmission' and Outcome == 'Succeeded' and isnotempty(ToolName)
+    | extend DestinationHost = tolower(trim_end(@'\.+', DestinationHost))
+    | where DestinationHost matches regex @'^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$'
+    | join kind=leftanti Allowed on AgentId, DestinationHost
+    | project AgentId, SessionId, CorrelationId, SendAt = TimeGenerated, SendId = EventId, ActorUPN = tolower(ActorUPN), ToolName, DestinationHost;
+Reads
+| join kind=inner Sends on AgentId, SessionId, CorrelationId
+| where SendAt > ReadAt and SendAt <= ReadAt + 10m and SendId != ReadId
+| summarize arg_max(ReadAt, *) by AgentId, SessionId, CorrelationId, SendId
+| project TimeGenerated = SendAt, AgentId, ActorUPN, SessionId, DestinationHost,
+          Evidence = tostring(bag_pack('readEventId', ReadId, 'readAt', ReadAt, 'submissionEventId', SendId, 'classification', DataClassification, 'toolName', ToolName, 'destinationHost', DestinationHost, 'correlationId', CorrelationId, 'assessment', 'Shared trace; transferred content not proven')),
+          CorrelationQuality = 'heuristic', AccountCustomEntity = ActorUPN

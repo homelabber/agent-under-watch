@@ -1,0 +1,42 @@
+// New means absent from the preceding observable baseline, not first-ever access.
+let Agents = _GetWatchlist('AIAgentInventory')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId))
+    | where isnotempty(AgentId) | distinct AgentId;
+let Allowed = _GetWatchlist('AIAgentAllowedDestinations')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId)), DestinationHost = tolower(trim_end(@'\.+', tostring(DestinationHost)))
+    | where isnotempty(AgentId) and DestinationHost matches regex @'^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$'
+    | distinct AgentId, DestinationHost;
+let ConfiguredAgents = Allowed | distinct AgentId;
+let Runtimes = _GetWatchlist('AIAgentRuntimeInventory')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId)), DeviceId = tolower(tostring(DeviceId)),
+              RuntimeFile = tolower(tostring(ProcessFileName)), RuntimeFolder = tolower(tostring(ProcessFolderPath))
+    | where isnotempty(AgentId) and isnotempty(DeviceId) and isnotempty(RuntimeFile) and isnotempty(RuntimeFolder)
+    | join kind=inner Agents on AgentId
+    | join kind=inner ConfiguredAgents on AgentId
+    | distinct AgentId, DeviceId, RuntimeFile, RuntimeFolder;
+let Connections = DeviceNetworkEvents
+    | where TimeGenerated between (ago(14d) .. now()) and ActionType == 'ConnectionSuccess'
+    | where isnotempty(RemoteUrl)
+    | extend DeviceId = tolower(DeviceId), RuntimeFile = tolower(InitiatingProcessFileName), RuntimeFolder = tolower(InitiatingProcessFolderPath)
+    | join kind=inner Runtimes on DeviceId, RuntimeFile, RuntimeFolder
+    | extend ParsedHost = tostring(parse_url(iff(RemoteUrl contains '://', RemoteUrl, strcat('https://', RemoteUrl))).Host)
+    | extend DestinationHost = tolower(trim_end(@'\.+', ParsedHost))
+    | where DestinationHost matches regex @'^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' and isnull(parse_ipv4(DestinationHost))
+    | project TimeGenerated, AgentId, DeviceId, DeviceName, DestinationHost, RemoteIP, ReportId,
+              ActorUPN = tolower(InitiatingProcessAccountUpn);
+let Baseline = Connections | where TimeGenerated < ago(1h) | distinct AgentId, DestinationHost;
+// Cold-start protection: require observations on at least three distinct baseline days per agent.
+let BaselineReady = Connections | where TimeGenerated < ago(1h)
+    | summarize ObservedDays = dcount(startofday(TimeGenerated)) by AgentId | where ObservedDays >= 3 | project AgentId;
+Connections
+| where TimeGenerated >= ago(1h)
+| join kind=inner BaselineReady on AgentId
+| join kind=leftanti Baseline on AgentId, DestinationHost
+| join kind=leftanti Allowed on AgentId, DestinationHost
+| summarize arg_min(TimeGenerated, *) by AgentId, DestinationHost
+| project TimeGenerated, AgentId, ActorUPN, DeviceId, DestinationHost,
+          Evidence = tostring(bag_pack('reportId', ReportId, 'destinationHost', DestinationHost, 'remoteIP', RemoteIP, 'baseline', 'Prior observable portion of 14-day window; minimum 3 observed days')),
+          CorrelationQuality = 'heuristic', HostCustomEntity = DeviceName, AccountCustomEntity = ActorUPN, IPCustomEntity = RemoteIP

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string"
+    },
+    "enableRule": {
+      "type": "bool",
+      "defaultValue": false
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2024-03-01",
+      "kind": "Scheduled",
+      "name": "[format('{0}/Microsoft.SecurityInsights/b0714ac8-c6db-4411-b8ea-d624a763004e', parameters('workspaceName'))]",
+      "properties": {
+        "description": "Successful Entra app-role assignment or delegated permission grant audit whose ServicePrincipal target ID matches an enabled agent inventory identity; a configuration review signal, not an escalation claim.",
+        "severity": "Medium",
+        "queryFrequency": "PT15M",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "tactics": [],
+        "displayName": "AI Agent | Permission assignment audit targets a registered agent identity",
+        "query": "// TargetResources establishes identity targeting, not the grantee role or permission risk.\nlet Agents = _GetWatchlist('AIAgentInventory')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId)), AgentSP = tolower(tostring(ServicePrincipalObjectId))\n    | where isnotempty(AgentId) and isnotempty(AgentSP)\n    | distinct AgentId, AgentSP;\nAuditLogs\n| where TimeGenerated >= ago(1h) and Result =~ 'success'\n| where OperationName in~ ('Add app role assignment to service principal', 'Add delegated permission grant')\n| where isnotempty(Id)\n| summarize arg_max(TimeGenerated, *) by Id\n| mv-expand Target = TargetResources\n| extend AgentSP = tolower(tostring(Target.id)), ActorUPN = tolower(tostring(InitiatedBy.user.userPrincipalName))\n| where tostring(Target.type) =~ 'ServicePrincipal' and isnotempty(AgentSP)\n| join kind=inner Agents on AgentSP\n| summarize arg_max(TimeGenerated, *) by Id, AgentId, AgentSP\n| project TimeGenerated, AgentId, ActorUPN, ServicePrincipalObjectId = AgentSP,\n          Evidence = tostring(bag_pack('auditId', Id, 'operation', OperationName, 'targetId', AgentSP, 'targetRole', 'Unresolved; inspect audit payload', 'assessment', 'Permission configuration audit; risk not established')),\n          CorrelationQuality = 'configuration', AccountCustomEntity = ActorUPN\n",
+        "enabled": "[parameters('enableRule')]",
+        "suppressionDuration": "PT1H",
+        "suppressionEnabled": false,
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": false
+          }
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "SingleAlert"
+        },
+        "customDetails": {
+          "AgentId": "AgentId",
+          "CorrelationQuality": "CorrelationQuality"
+        }
+      }
+    }
+  ]
+}

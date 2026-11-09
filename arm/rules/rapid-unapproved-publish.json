@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string"
+    },
+    "enableRule": {
+      "type": "bool",
+      "defaultValue": false
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2024-03-01",
+      "kind": "Scheduled",
+      "name": "[format('{0}/Microsoft.SecurityInsights/38717b67-b391-4b2f-b35e-fc2ab3fd33a4', parameters('workspaceName'))]",
+      "properties": {
+        "description": "Successful creation followed within 30 minutes by publication of the same observed BotId by the same UPN in the same environment, without an enabled matching maker approval. Includes unregistered agents; inventory enriches registration status only.",
+        "severity": "Medium",
+        "queryFrequency": "PT15M",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "tactics": [],
+        "displayName": "AI Agent | Agent rapidly created and published by an unapproved maker",
+        "query": "// Uses observed BotId even when unregistered; inventory only enriches registration status.\nlet Agents = _GetWatchlist('AIAgentInventory')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId))\n    | where isnotempty(AgentId) | distinct AgentId\n    | extend RegistrationStatus = 'Registered';\nlet Approved = _GetWatchlist('AIAgentApprovedMakers')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project ActorUPN = tolower(tostring(ActorUPN)), ApprovedEnvironment = tolower(tostring(EnvironmentId))\n    | where isnotempty(ActorUPN) and isnotempty(ApprovedEnvironment);\nlet Events = PowerPlatformAdminActivity\n    | where TimeGenerated >= ago(1h)\n    | where EventResult == 'Succeeded'\n    | where EventOriginalType in ('BotCreate', 'BotUpdateOperation-BotPublish')\n    | extend AgentId = tolower(coalesce(tostring(Properties.BotId), tostring(PropertyCollection.BotId))),\n             ActorUPN = tolower(tostring(ActorName)), Environment = tolower(tostring(EnvironmentId))\n    | where isnotempty(AgentId) and ActorUPN contains '@' and isnotempty(Environment) and isnotempty(EventOriginalUid)\n    | summarize arg_max(TimeGenerated, *) by EventOriginalUid\n    | join kind=leftouter Agents on AgentId\n    | extend RegistrationStatus = coalesce(RegistrationStatus, 'Unknown');\nlet Created = Events | where EventOriginalType == 'BotCreate'\n    | project AgentId, ActorUPN, Environment, CreatedAt = TimeGenerated, CreateEventId = tostring(EventOriginalUid);\nlet Published = Events | where EventOriginalType == 'BotUpdateOperation-BotPublish'\n    | project AgentId, ActorUPN, Environment, RegistrationStatus, PublishedAt = TimeGenerated, PublishEventId = tostring(EventOriginalUid);\nlet ExactApproval = Approved | where ApprovedEnvironment != '*'\n    | project ActorUPN, Environment = ApprovedEnvironment;\nlet GlobalApproval = Approved | where ApprovedEnvironment == '*' | distinct ActorUPN;\nCreated\n| join kind=inner Published on AgentId, ActorUPN, Environment\n| where PublishedAt >= CreatedAt and PublishedAt <= CreatedAt + 30m\n| join kind=leftanti ExactApproval on ActorUPN, Environment\n| join kind=leftanti GlobalApproval on ActorUPN\n| summarize arg_max(CreatedAt, *) by AgentId, ActorUPN, Environment, PublishEventId\n| project TimeGenerated = PublishedAt, AgentId, ActorUPN, EnvironmentId = Environment, RegistrationStatus,\n          Evidence = tostring(bag_pack('createEventId', CreateEventId, 'publishEventId', PublishEventId, 'createdAt', CreatedAt, 'publishedAt', PublishedAt)),\n          CorrelationQuality = 'exact', AccountCustomEntity = ActorUPN\n",
+        "enabled": "[parameters('enableRule')]",
+        "suppressionDuration": "PT1H",
+        "suppressionEnabled": false,
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": false
+          }
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "SingleAlert"
+        },
+        "customDetails": {
+          "AgentId": "AgentId",
+          "CorrelationQuality": "CorrelationQuality"
+        }
+      }
+    }
+  ]
+}

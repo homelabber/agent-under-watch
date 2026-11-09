@@ -1,0 +1,23 @@
+# Local Python/build outputs
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Authentication, secrets and local tooling state
+.azure/
+azure-tenant-test/
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+*.key
+*.log
+
+# Keep customer-specific telemetry and mappings out of public commits
+tenant-*.json
+*.local.csv
+watchlists/local/
+private/
+local/

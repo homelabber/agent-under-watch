@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string"
+    },
+    "enableRule": {
+      "type": "bool",
+      "defaultValue": false
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2024-03-01",
+      "kind": "Scheduled",
+      "name": "[format('{0}/Microsoft.SecurityInsights/c643233a-29c6-419e-aa0e-a9466b4da301', parameters('workspaceName'))]",
+      "properties": {
+        "description": "Permission audit targeting a known agent service principal followed within 30 minutes by a successful service-principal sign-in with the same object ID.",
+        "severity": "Medium",
+        "queryFrequency": "PT15M",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "tactics": [],
+        "displayName": "AI Agent | Registered agent identity signs in after a permission audit",
+        "query": "// A successful sign-in does not prove use of the audited permission or access to data.\nlet Agents = _GetWatchlist('AIAgentInventory')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId)), AgentSP = tolower(tostring(ServicePrincipalObjectId))\n    | where isnotempty(AgentId) and isnotempty(AgentSP)\n    | distinct AgentId, AgentSP;\nlet Grants = AuditLogs\n    | where TimeGenerated >= ago(1h) and Result =~ 'success'\n    | where OperationName in~ ('Add app role assignment to service principal', 'Add delegated permission grant')\n    | where isnotempty(Id)\n    | summarize arg_max(TimeGenerated, *) by Id\n    | mv-expand Target = TargetResources\n    | extend AgentSP = tolower(tostring(Target.id)), ActorUPN = tolower(tostring(InitiatedBy.user.userPrincipalName))\n    | where tostring(Target.type) =~ 'ServicePrincipal' and isnotempty(AgentSP)\n    | join kind=inner Agents on AgentSP\n    | project AgentId, AgentSP, ActorUPN, GrantAt = TimeGenerated, AuditId = Id, OperationName\n    | distinct AgentId, AgentSP, ActorUPN, GrantAt, AuditId, OperationName;\nlet SignIns = AADServicePrincipalSignInLogs\n    | where TimeGenerated >= ago(1h) and tostring(ResultType) == '0'\n    | where isnotempty(Id) and isnotempty(ServicePrincipalId)\n    | summarize arg_max(TimeGenerated, *) by Id\n    | project AgentSP = tolower(tostring(ServicePrincipalId)), SignInAt = TimeGenerated,\n              SignInId = Id, IPAddress, ResourceDisplayName;\nGrants\n| join kind=inner SignIns on AgentSP\n| where SignInAt >= GrantAt and SignInAt <= GrantAt + 30m\n| summarize arg_max(GrantAt, *) by AgentId, AgentSP, SignInId\n| project TimeGenerated = SignInAt, AgentId, ActorUPN, ServicePrincipalObjectId = AgentSP,\n          Evidence = tostring(bag_pack('auditId', AuditId, 'operation', OperationName, 'grantAt', GrantAt, 'signInId', SignInId, 'resource', ResourceDisplayName, 'assessment', 'Identity-targeted permission audit followed by authentication; permission use not proven')),\n          CorrelationQuality = 'heuristic', AccountCustomEntity = ActorUPN, IPCustomEntity = IPAddress\n",
+        "enabled": "[parameters('enableRule')]",
+        "suppressionDuration": "PT1H",
+        "suppressionEnabled": false,
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": false
+          }
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "SingleAlert"
+        },
+        "customDetails": {
+          "AgentId": "AgentId",
+          "CorrelationQuality": "CorrelationQuality"
+        }
+      }
+    }
+  ]
+}

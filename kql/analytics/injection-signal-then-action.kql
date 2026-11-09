@@ -1,0 +1,21 @@
+let Agents = _GetWatchlist('AIAgentInventory')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId))
+    | where isnotempty(AgentId) | distinct AgentId;
+let Events = AIAgentEvent_CL
+    | where TimeGenerated >= ago(1h) and SchemaVersion == '1.0'
+    | extend AgentId = tolower(AgentId)
+    | where isnotempty(AgentId) and isnotempty(SessionId) and isnotempty(EventId)
+    | summarize arg_max(TimeGenerated, *) by AgentId, EventId
+    | join kind=inner Agents on AgentId;
+let Signals = Events | where EventType == 'InjectionSignal'
+    | project AgentId, SessionId, SignalAt = TimeGenerated, SignalId = EventId;
+let Actions = Events | where EventType in ('ToolInvocation', 'ExternalSubmission') and Outcome == 'Succeeded'
+    | project AgentId, SessionId, ActionAt = TimeGenerated, ActionId = EventId, ActorUPN = tolower(ActorUPN), ToolName, EventType;
+Signals
+| join kind=inner Actions on AgentId, SessionId
+| where ActionAt > SignalAt and ActionAt <= SignalAt + 10m and ActionId != SignalId
+| summarize arg_max(SignalAt, *) by AgentId, SessionId, ActionId
+| project TimeGenerated = ActionAt, AgentId, ActorUPN, SessionId,
+          Evidence = tostring(bag_pack('signalEventId', SignalId, 'signalAt', SignalAt, 'actionEventId', ActionId, 'actionType', EventType, 'toolName', ToolName, 'assessment', 'Ordered session association; malicious influence not proven')),
+          CorrelationQuality = 'heuristic', AccountCustomEntity = ActorUPN

@@ -1,0 +1,314 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "name": "Agent Under Watch — PREVIEW",
+      "content": {
+        "json": "## Agent Under Watch — PREVIEW\n\n**Preview: not production-validated. Investigation and correlation, not a zero-day guarantee.** Native-first deployment; optional normalized agent events are separately enabled. All analytics deploy disabled. A missing signal is not a clean bill of health."
+      }
+    },
+    {
+      "type": 9,
+      "name": "Scope",
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "style": "pills",
+        "parameters": [
+          {
+            "id": "workspace",
+            "name": "Workspace",
+            "type": 5,
+            "isRequired": true,
+            "value": "__WORKSPACE_RESOURCE_ID__",
+            "typeSettings": {
+              "resourceTypeFilter": {
+                "microsoft.operationalinsights/workspaces": true
+              },
+              "additionalResourceOptions": []
+            }
+          },
+          {
+            "id": "time",
+            "name": "TimeRange",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 86400000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 604800000
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": 1,
+      "name": "SOC overview",
+      "content": {
+        "json": "## SOC overview\n\nStart with pack-generated alerts, then pivot by AgentId and entity evidence. Configuration findings are not confirmed compromise. Related events linked only by time must remain explicitly heuristic."
+      }
+    },
+    {
+      "type": 3,
+      "name": "Alert volume by severity",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Alert volume by severity",
+        "query": "SecurityAlert\n| where AlertName startswith \"AI Agent |\"\n| summarize Alerts=dcount(SystemAlertId) by AlertSeverity",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "tiles",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 3,
+      "name": "Alert trend",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Alert trend",
+        "query": "SecurityAlert\n| where AlertName startswith \"AI Agent |\"\n| summarize Alerts=dcount(SystemAlertId) by bin(TimeGenerated, 1h), AlertSeverity\n| order by TimeGenerated asc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "timechart",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 3,
+      "name": "Pack alerts",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Pack alerts",
+        "query": "SecurityAlert\n| where AlertName startswith \"AI Agent |\"\n| summarize Alerts=dcount(SystemAlertId), LastSeen=max(TimeGenerated) by AlertName, AlertSeverity\n| order by LastSeen desc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 3,
+      "name": "Incident triage queue",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Incident triage queue",
+        "query": "SecurityIncident\n| where Title startswith \"AI Agent |\"\n| summarize arg_max(TimeGenerated, *) by IncidentNumber\n| project IncidentNumber, Title, Severity, Status, AssignedTo=tostring(Owner.assignedTo), IncidentUrl, LastModifiedTime\n| order by LastModifiedTime desc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 3,
+      "name": "Known agent ownership and exposure",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Known agent ownership and exposure",
+        "query": "_GetWatchlist('AIAgentInventory') | where tolower(tostring(Enabled)) == 'true'\n| project AgentId, AgentName, OwnerUPN, Criticality, ServicePrincipalObjectId, AppId",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 1,
+      "name": "Lifecycle and trust",
+      "content": {
+        "json": "## Lifecycle and trust\n\nCreation, publication, authentication changes and component changes. Verify the actual change before calling it a weakening. BotId extraction requires tenant payload validation; unresolved IDs are a coverage gap."
+      }
+    },
+    {
+      "type": 3,
+      "name": "Agent authoring timeline",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Agent authoring timeline",
+        "query": "PowerPlatformAdminActivity\n| where EventOriginalType startswith \"Bot\" or EventOriginalType startswith \"AIPlugin\"\n| extend AgentId=coalesce(tostring(Properties.BotId), tostring(PropertyCollection.BotId))\n| project TimeGenerated, AgentId, ActorName, EventOriginalType, EventResult, EnvironmentId, EventOriginalUid\n| order by TimeGenerated desc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 1,
+      "name": "Identity and access",
+      "content": {
+        "json": "## Identity and access\n\nOnly explicitly inventoried agent identities are in scope. These sign-ins do not by themselves prove which agent session caused a resource operation. Successful sign-in is not proof of sensitive-data access."
+      }
+    },
+    {
+      "type": 3,
+      "name": "Known agent service principal sign-ins",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Known agent service principal sign-ins",
+        "query": "let Agents=_GetWatchlist('AIAgentInventory')\n| where tolower(tostring(Enabled)) == \"true\"\n| project AgentId=tolower(tostring(AgentId)), SPId=tolower(tostring(ServicePrincipalObjectId));\nAADServicePrincipalSignInLogs\n| extend SPId=tolower(ServicePrincipalId)\n| join kind=inner Agents on SPId\n| project TimeGenerated, AgentId, ServicePrincipalId, IPAddress, ResourceDisplayName, ResultType, CorrelationId\n| order by TimeGenerated desc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 1,
+      "name": "Prompt injection and data exposure — optional",
+      "content": {
+        "json": "## Prompt injection and data exposure — optional\n\nRequires the normalized AIAgentEvent_CL contract, validated producer identity and stable agent/session IDs. Native alerts remain in Defender. No claim is made that standard audit events contain full prompts, tool arguments or sensitive-content labels."
+      }
+    },
+    {
+      "type": 3,
+      "name": "Optional agent session timeline",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Optional agent session timeline",
+        "query": "union isfuzzy=true\n(datatable(TimeGenerated:datetime, AgentId:string, SessionId:string, EventType:string, ToolName:string, DestinationHost:string, Outcome:string, Evidence:string) []),\n(AIAgentEvent_CL | project TimeGenerated, AgentId, SessionId, EventType, ToolName, DestinationHost, Outcome, Evidence)\n| order by TimeGenerated desc | take 200",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 1,
+      "name": "Endpoint execution",
+      "content": {
+        "json": "## Endpoint execution\n\nMap exact DeviceId, runtime executable and folder path before enabling endpoint rules. Child process and network evidence establish process lineage, not prompt causality. Device timelines may contain sensitive command lines; use native protected investigation views."
+      }
+    },
+    {
+      "type": 3,
+      "name": "Registered runtime activity",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Registered runtime activity",
+        "query": "let Runtimes=_GetWatchlist('AIAgentRuntimeInventory')\n| where tolower(tostring(Enabled)) == \"true\"\n| project AgentId=tostring(AgentId), DeviceId=tostring(DeviceId), RuntimeName=tolower(tostring(ProcessFileName)), RuntimeFolder=tolower(tostring(ProcessFolderPath));\nDeviceProcessEvents\n| extend RuntimeName=tolower(InitiatingProcessFileName), RuntimeFolder=tolower(InitiatingProcessFolderPath)\n| join kind=inner Runtimes on DeviceId, RuntimeName, RuntimeFolder\n| project TimeGenerated, AgentId, DeviceName, FileName, FolderPath, InitiatingProcessFileName, ProcessId, InitiatingProcessId\n| order by TimeGenerated desc | take 200",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 1,
+      "name": "Threat-informed coverage",
+      "content": {
+        "json": "## Threat-informed coverage\n\nSources and evidence classifications live in catalog/threats.json. Techniques are not attributed to an actor without evidence. Detections must be replay-tested and tuned against your tenant. Last six months is a maintenance priority, not a reason to discard older techniques."
+      }
+    },
+    {
+      "type": 3,
+      "name": "Detection prerequisites and evidence boundaries",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Detection prerequisites and evidence boundaries",
+        "query": "datatable(Detection:string, Module:string, Correlation:string, RequiredTables:string, Limitations:string) [\n\"Agent rapidly created and published by an unapproved maker\",\n\"Native\",\n\"exact\",\n\"PowerPlatformAdminActivity\",\n\"Requires validated observed BotId payload, a UPN-valued ActorName, environment ID and event UID, but not inventory registration. Inventory is left-joined for Registered/Unknown status only; missing inventory watchlist remains a setup failure. Different creator/publisher, missing fields, partial successes and failed operations are excluded. Approval is evaluated at query time, not historical event time. Exact event linkage is not malicious intent; no ATT&CK tactic asserted.\",\n\"Registered agent authentication configuration changed\",\n\"Native\",\n\"configuration\",\n\"PowerPlatformAdminActivity\",\n\"Operation name alone cannot establish old/new authentication mode, weakened controls or an attacker. Requires BotId in validated Properties or PropertyCollection object and event UID. ActorUPN is empty when ActorName is not a UPN. No ATT&CK tactic asserted.\",\n\"Permission assignment audit targets a registered agent identity\",\n\"Native\",\n\"configuration\",\n\"AuditLogs\",\n\"Known object ID match is required; never matches display name or app ID to an object ID. TargetResources may include resource and client principals: targeting does not identify the grantee or prove risky permissions. Validate audit target shape and operation spelling locally. No privileged scope classification or ATT&CK tactic asserted.\",\n\"Registered agent identity signs in after a permission audit\",\n\"Native\",\n\"heuristic\",\n\"AuditLogs, AADServicePrincipalSignInLogs\",\n\"Uses exact service-principal object ID and bounded time, but audit targeting may mean resource rather than grantee. Sign-in proves authentication only, not use of the new permission, API access, sensitive-data access or escalation. ActorUPN refers to the audit initiator, not the signing-in service principal. Managed identity sign-ins are not covered.\",\n\"Registered agent runtime spawns a shell with network activity\",\n\"Native\",\n\"heuristic\",\n\"DeviceProcessEvents, DeviceNetworkEvents\",\n\"Device ID plus case-insensitive exact parent filename/path identifies a configured runtime, not a proven agent session. Child/network linkage additionally requires PID and exact creation time to avoid PID reuse. Covers selected direct Windows shell children only; ordinary administrative tools can trigger. A connection does not prove exfiltration. Execution tactic maps observed shell execution, not a verified attack.\",\n\"Registered agent runtime contacts a new non-allowlisted destination\",\n\"Native\",\n\"heuristic\",\n\"DeviceNetworkEvents\",\n\"Requires nonempty valid enabled allowlist per agent, hostname-bearing RemoteUrl, and baseline observations on three distinct days. Recent window is one hour; baseline is earlier observations within 14 days, not first-ever access. Hostname equality only, no suffix/wildcard approval. Does not cover IP-only events, prove data transfer, or claim MDE observes arbitrary file reads. No ATT&CK tactic asserted.\",\n\"Optional: injection signal followed by a successful agent action\",\n\"Optional\",\n\"heuristic\",\n\"AIAgentEvent_CL\",\n\"Not native Microsoft telemetry. Requires schema 1.0 contract and producer-guaranteed unique sessions and immutable event IDs. Ordered session association does not prove prompt influence or malicious action. Blocked, failed and unknown actions are excluded; equal timestamps cannot establish order. No ATT&CK mapping inferred for prompt injection.\",\n\"Optional: sensitive-data access followed by a non-allowlisted tool submission\",\n\"Optional\",\n\"heuristic\",\n\"AIAgentEvent_CL\",\n\"Not native telemetry. Requires trusted classifications, a nonempty correlation ID linking the trace, tool name, canonical destination hostname and an enabled per-agent allowlist. Excludes blocked/failed/unknown operations. Shared trace does not prove the submitted bytes contain the accessed data or establish exfiltration; no ATT&CK tactic asserted.\"\n]",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 1,
+      "name": "Telemetry health",
+      "content": {
+        "json": "## Telemetry health\n\nNOT OBSERVED combines missing table, no records, and selected-window limitations. It is never labeled healthy. The two-hour stale indicator is an investigation prompt, not an outage detector; adapt to source cadence. Optional tables are not core prerequisites."
+      }
+    },
+    {
+      "type": 3,
+      "name": "Source availability and last seen",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Source availability and last seen",
+        "query": "let Expected = datatable(Source:string) [\"PowerPlatformAdminActivity\", \"AuditLogs\", \"AADServicePrincipalSignInLogs\", \"DeviceProcessEvents\", \"DeviceNetworkEvents\", \"SecurityAlert\", \"AIAgentEvent_CL\"];\nlet Seen = union isfuzzy=true\n    (datatable(Source:string, LastSeen:datetime) []),\n    (PowerPlatformAdminActivity | summarize LastSeen=max(TimeGenerated) | extend Source=\"PowerPlatformAdminActivity\"),\n    (AuditLogs | summarize LastSeen=max(TimeGenerated) | extend Source=\"AuditLogs\"),\n    (AADServicePrincipalSignInLogs | summarize LastSeen=max(TimeGenerated) | extend Source=\"AADServicePrincipalSignInLogs\"),\n    (DeviceProcessEvents | summarize LastSeen=max(TimeGenerated) | extend Source=\"DeviceProcessEvents\"),\n    (DeviceNetworkEvents | summarize LastSeen=max(TimeGenerated) | extend Source=\"DeviceNetworkEvents\"),\n    (SecurityAlert | summarize LastSeen=max(TimeGenerated) | extend Source=\"SecurityAlert\"),\n    (AIAgentEvent_CL | summarize LastSeen=max(TimeGenerated) | extend Source=\"AIAgentEvent_CL\");\nExpected | join kind=leftouter Seen on Source\n| extend Status=case(isnull(LastSeen), \"NOT OBSERVED — missing, empty, or outside selected window\", LastSeen < ago(2h), \"STALE — investigate expected cadence\", \"RECEIVING — does not prove complete coverage\")\n| project Source, LastSeen, Status",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange"
+      }
+    },
+    {
+      "type": 3,
+      "name": "Optional schema and producer coverage",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Optional schema and producer coverage",
+        "query": "union isfuzzy=true\n(datatable(TimeGenerated:datetime, AgentId:string, SchemaVersion:string, EventType:string) []),\n(AIAgentEvent_CL | project TimeGenerated, AgentId, SchemaVersion, EventType)\n| summarize LastSeen=max(TimeGenerated), Events=count(), EventTypes=make_set(EventType, 20) by AgentId, SchemaVersion",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange"
+      }
+    }
+  ],
+  "isLocked": false,
+  "fallbackResourceIds": [
+    "__WORKSPACE_RESOURCE_ID__"
+  ]
+}

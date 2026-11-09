@@ -1,0 +1,35 @@
+[
+  {
+    "id": "microsoft-mcp-tool-poisoning-2026-06-30",
+    "title": "Securing AI agents: When AI tools move from reading to acting",
+    "published": "2026-06-30",
+    "url": "https://www.microsoft.com/en-us/security/blog/2026/06/30/securing-ai-agents-ai-tools-move-from-reading-acting/",
+    "classification": "Reported observed technique; illustrative attack chain",
+    "claim": "Microsoft reports MCP tool-poisoning techniques observed against enterprise agents in 2026. The invoice example is illustrative, not a separately verified named-victim breach.",
+    "coverage": "Native lifecycle/configuration signals are context only. Detecting tool metadata drift requires extra collection not included in the native release. Optional session correlations can identify downstream actions if independently instrumented.",
+    "reviewed": "2026-11-09",
+    "actorAttribution": "Not established"
+  },
+  {
+    "id": "ghostsplice-2026-08-11",
+    "title": "Malicious MCP Servers Can Split Instructions to Make AI Coding Agents Exfiltrate Secrets",
+    "published": "2026-08-11",
+    "url": "https://thehackernews.com/2026/08/malicious-mcp-servers-can-split.html",
+    "classification": "Research proof of concept; secondary reporting",
+    "claim": "Controlled testing with fake credentials demonstrated split instructions across MCP metadata and tool responses. It does not establish malicious intrusions or real-world success rates.",
+    "coverage": "Optional session-level injection and data-submission correlations only; native process/network signals cannot prove secret-file reads or detect the split instructions themselves.",
+    "reviewed": "2026-11-09",
+    "actorAttribution": "Not applicable"
+  },
+  {
+    "id": "agentic-secret-abuse-2026-11-05",
+    "title": "Threat actors use agentic AI tooling to find and abuse exposed secrets",
+    "published": "2026-11-05",
+    "url": "https://www.microsoft.com/en-us/security/blog/2026/11/05/threat-actors-use-agentic-ai-tooling-to-find-and-abuse-exposed-secrets/",
+    "classification": "Observed malicious credential abuse; adversarial use of AI",
+    "claim": "Microsoft reports agentic discovery and abuse of exposed credentials, followed by cloud access. This is not evidence of prompt injection against a victim AI agent.",
+    "coverage": "Known agent service-principal permission and sign-in anomalies are partial coverage. This release does not inventory arbitrary stolen AI API keys, collect Key Vault data access by default, or prove resource exfiltration from sign-ins.",
+    "reviewed": "2026-11-09",
+    "actorAttribution": "No additional attribution inferred by this content pack"
+  }
+]

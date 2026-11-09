@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string"
+    },
+    "enableRule": {
+      "type": "bool",
+      "defaultValue": false
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2024-03-01",
+      "kind": "Scheduled",
+      "name": "[format('{0}/Microsoft.SecurityInsights/6c481ea3-b2d8-4d73-874f-92dd122a130b', parameters('workspaceName'))]",
+      "properties": {
+        "description": "Normalized custom injection signal followed strictly later within 10 minutes by a successful tool invocation or external submission in the same registered agent session.",
+        "severity": "Medium",
+        "queryFrequency": "PT15M",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "tactics": [],
+        "displayName": "AI Agent | Optional: injection signal followed by a successful agent action",
+        "query": "let Agents = _GetWatchlist('AIAgentInventory')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId))\n    | where isnotempty(AgentId) | distinct AgentId;\nlet Events = AIAgentEvent_CL\n    | where TimeGenerated >= ago(1h) and SchemaVersion == '1.0'\n    | extend AgentId = tolower(AgentId)\n    | where isnotempty(AgentId) and isnotempty(SessionId) and isnotempty(EventId)\n    | summarize arg_max(TimeGenerated, *) by AgentId, EventId\n    | join kind=inner Agents on AgentId;\nlet Signals = Events | where EventType == 'InjectionSignal'\n    | project AgentId, SessionId, SignalAt = TimeGenerated, SignalId = EventId;\nlet Actions = Events | where EventType in ('ToolInvocation', 'ExternalSubmission') and Outcome == 'Succeeded'\n    | project AgentId, SessionId, ActionAt = TimeGenerated, ActionId = EventId, ActorUPN = tolower(ActorUPN), ToolName, EventType;\nSignals\n| join kind=inner Actions on AgentId, SessionId\n| where ActionAt > SignalAt and ActionAt <= SignalAt + 10m and ActionId != SignalId\n| summarize arg_max(SignalAt, *) by AgentId, SessionId, ActionId\n| project TimeGenerated = ActionAt, AgentId, ActorUPN, SessionId,\n          Evidence = tostring(bag_pack('signalEventId', SignalId, 'signalAt', SignalAt, 'actionEventId', ActionId, 'actionType', EventType, 'toolName', ToolName, 'assessment', 'Ordered session association; malicious influence not proven')),\n          CorrelationQuality = 'heuristic', AccountCustomEntity = ActorUPN\n",
+        "enabled": "[parameters('enableRule')]",
+        "suppressionDuration": "PT1H",
+        "suppressionEnabled": false,
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": false
+          }
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "SingleAlert"
+        },
+        "customDetails": {
+          "AgentId": "AgentId",
+          "CorrelationQuality": "CorrelationQuality"
+        }
+      }
+    }
+  ]
+}

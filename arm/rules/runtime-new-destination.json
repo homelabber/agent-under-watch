@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string"
+    },
+    "enableRule": {
+      "type": "bool",
+      "defaultValue": false
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2024-03-01",
+      "kind": "Scheduled",
+      "name": "[format('{0}/Microsoft.SecurityInsights/3ee9c26b-52d7-47cd-a809-9f18d56ec539', parameters('workspaceName'))]",
+      "properties": {
+        "description": "Successful runtime connection to a hostname absent from both the enabled per-agent allowlist and the preceding observable portion of a 14-day baseline; requires at least three observed baseline days.",
+        "severity": "Low",
+        "queryFrequency": "PT15M",
+        "queryPeriod": "P14D",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "tactics": [],
+        "displayName": "AI Agent | Registered agent runtime contacts a new non-allowlisted destination",
+        "query": "// New means absent from the preceding observable baseline, not first-ever access.\nlet Agents = _GetWatchlist('AIAgentInventory')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId))\n    | where isnotempty(AgentId) | distinct AgentId;\nlet Allowed = _GetWatchlist('AIAgentAllowedDestinations')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId)), DestinationHost = tolower(trim_end(@'\\.+', tostring(DestinationHost)))\n    | where isnotempty(AgentId) and DestinationHost matches regex @'^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$'\n    | distinct AgentId, DestinationHost;\nlet ConfiguredAgents = Allowed | distinct AgentId;\nlet Runtimes = _GetWatchlist('AIAgentRuntimeInventory')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId)), DeviceId = tolower(tostring(DeviceId)),\n              RuntimeFile = tolower(tostring(ProcessFileName)), RuntimeFolder = tolower(tostring(ProcessFolderPath))\n    | where isnotempty(AgentId) and isnotempty(DeviceId) and isnotempty(RuntimeFile) and isnotempty(RuntimeFolder)\n    | join kind=inner Agents on AgentId\n    | join kind=inner ConfiguredAgents on AgentId\n    | distinct AgentId, DeviceId, RuntimeFile, RuntimeFolder;\nlet Connections = DeviceNetworkEvents\n    | where TimeGenerated between (ago(14d) .. now()) and ActionType == 'ConnectionSuccess'\n    | where isnotempty(RemoteUrl)\n    | extend DeviceId = tolower(DeviceId), RuntimeFile = tolower(InitiatingProcessFileName), RuntimeFolder = tolower(InitiatingProcessFolderPath)\n    | join kind=inner Runtimes on DeviceId, RuntimeFile, RuntimeFolder\n    | extend ParsedHost = tostring(parse_url(iff(RemoteUrl contains '://', RemoteUrl, strcat('https://', RemoteUrl))).Host)\n    | extend DestinationHost = tolower(trim_end(@'\\.+', ParsedHost))\n    | where DestinationHost matches regex @'^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' and isnull(parse_ipv4(DestinationHost))\n    | project TimeGenerated, AgentId, DeviceId, DeviceName, DestinationHost, RemoteIP, ReportId,\n              ActorUPN = tolower(InitiatingProcessAccountUpn);\nlet Baseline = Connections | where TimeGenerated < ago(1h) | distinct AgentId, DestinationHost;\n// Cold-start protection: require observations on at least three distinct baseline days per agent.\nlet BaselineReady = Connections | where TimeGenerated < ago(1h)\n    | summarize ObservedDays = dcount(startofday(TimeGenerated)) by AgentId | where ObservedDays >= 3 | project AgentId;\nConnections\n| where TimeGenerated >= ago(1h)\n| join kind=inner BaselineReady on AgentId\n| join kind=leftanti Baseline on AgentId, DestinationHost\n| join kind=leftanti Allowed on AgentId, DestinationHost\n| summarize arg_min(TimeGenerated, *) by AgentId, DestinationHost\n| project TimeGenerated, AgentId, ActorUPN, DeviceId, DestinationHost,\n          Evidence = tostring(bag_pack('reportId', ReportId, 'destinationHost', DestinationHost, 'remoteIP', RemoteIP, 'baseline', 'Prior observable portion of 14-day window; minimum 3 observed days')),\n          CorrelationQuality = 'heuristic', HostCustomEntity = DeviceName, AccountCustomEntity = ActorUPN, IPCustomEntity = RemoteIP\n",
+        "enabled": "[parameters('enableRule')]",
+        "suppressionDuration": "PT1H",
+        "suppressionEnabled": false,
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": false
+          }
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "SingleAlert"
+        },
+        "customDetails": {
+          "AgentId": "AgentId",
+          "CorrelationQuality": "CorrelationQuality"
+        }
+      }
+    }
+  ]
+}

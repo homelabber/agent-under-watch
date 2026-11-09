@@ -1,0 +1,198 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string"
+    },
+    "dceName": {
+      "type": "string",
+      "defaultValue": "[format('ai-agent-{0}', uniqueString(resourceGroup().id, parameters('workspaceName')))]"
+    },
+    "dcrName": {
+      "type": "string",
+      "defaultValue": "[format('ai-agent-{0}', uniqueString(resourceGroup().id, parameters('workspaceName')))]"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/tables",
+      "apiVersion": "2022-10-01",
+      "name": "[format('{0}/AIAgentEvent_CL', parameters('workspaceName'))]",
+      "properties": {
+        "schema": {
+          "name": "AIAgentEvent_CL",
+          "columns": [
+            {
+              "name": "TimeGenerated",
+              "type": "datetime"
+            },
+            {
+              "name": "EventId",
+              "type": "string"
+            },
+            {
+              "name": "AgentId",
+              "type": "string"
+            },
+            {
+              "name": "SessionId",
+              "type": "string"
+            },
+            {
+              "name": "EventType",
+              "type": "string"
+            },
+            {
+              "name": "ActorUPN",
+              "type": "string"
+            },
+            {
+              "name": "ToolName",
+              "type": "string"
+            },
+            {
+              "name": "DestinationHost",
+              "type": "string"
+            },
+            {
+              "name": "DataClassification",
+              "type": "string"
+            },
+            {
+              "name": "Outcome",
+              "type": "string"
+            },
+            {
+              "name": "ResourceId",
+              "type": "string"
+            },
+            {
+              "name": "CorrelationId",
+              "type": "string"
+            },
+            {
+              "name": "Evidence",
+              "type": "string"
+            },
+            {
+              "name": "SchemaVersion",
+              "type": "string"
+            }
+          ]
+        },
+        "retentionInDays": 30,
+        "totalRetentionInDays": 30
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionEndpoints",
+      "apiVersion": "2022-06-01",
+      "name": "[parameters('dceName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "networkAcls": {
+          "publicNetworkAccess": "Enabled"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2022-06-01",
+      "name": "[parameters('dcrName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', parameters('workspaceName'), 'AIAgentEvent_CL')]",
+        "[resourceId('Microsoft.Insights/dataCollectionEndpoints', parameters('dceName'))]"
+      ],
+      "properties": {
+        "dataCollectionEndpointId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', parameters('dceName'))]",
+        "streamDeclarations": {
+          "Custom-AIAgentEvent": {
+            "columns": [
+              {
+                "name": "TimeGenerated",
+                "type": "datetime"
+              },
+              {
+                "name": "EventId",
+                "type": "string"
+              },
+              {
+                "name": "AgentId",
+                "type": "string"
+              },
+              {
+                "name": "SessionId",
+                "type": "string"
+              },
+              {
+                "name": "EventType",
+                "type": "string"
+              },
+              {
+                "name": "ActorUPN",
+                "type": "string"
+              },
+              {
+                "name": "ToolName",
+                "type": "string"
+              },
+              {
+                "name": "DestinationHost",
+                "type": "string"
+              },
+              {
+                "name": "DataClassification",
+                "type": "string"
+              },
+              {
+                "name": "Outcome",
+                "type": "string"
+              },
+              {
+                "name": "ResourceId",
+                "type": "string"
+              },
+              {
+                "name": "CorrelationId",
+                "type": "string"
+              },
+              {
+                "name": "Evidence",
+                "type": "string"
+              },
+              {
+                "name": "SchemaVersion",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "destinations": {
+          "logAnalytics": [
+            {
+              "name": "agentWorkspace",
+              "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": [
+              "Custom-AIAgentEvent"
+            ],
+            "destinations": [
+              "agentWorkspace"
+            ],
+            "transformKql": "source",
+            "outputStream": "Custom-AIAgentEvent_CL"
+          }
+        ]
+      }
+    }
+  ]
+}

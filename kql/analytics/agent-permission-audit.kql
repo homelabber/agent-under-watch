@@ -1,0 +1,19 @@
+// TargetResources establishes identity targeting, not the grantee role or permission risk.
+let Agents = _GetWatchlist('AIAgentInventory')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId)), AgentSP = tolower(tostring(ServicePrincipalObjectId))
+    | where isnotempty(AgentId) and isnotempty(AgentSP)
+    | distinct AgentId, AgentSP;
+AuditLogs
+| where TimeGenerated >= ago(1h) and Result =~ 'success'
+| where OperationName in~ ('Add app role assignment to service principal', 'Add delegated permission grant')
+| where isnotempty(Id)
+| summarize arg_max(TimeGenerated, *) by Id
+| mv-expand Target = TargetResources
+| extend AgentSP = tolower(tostring(Target.id)), ActorUPN = tolower(tostring(InitiatedBy.user.userPrincipalName))
+| where tostring(Target.type) =~ 'ServicePrincipal' and isnotempty(AgentSP)
+| join kind=inner Agents on AgentSP
+| summarize arg_max(TimeGenerated, *) by Id, AgentId, AgentSP
+| project TimeGenerated, AgentId, ActorUPN, ServicePrincipalObjectId = AgentSP,
+          Evidence = tostring(bag_pack('auditId', Id, 'operation', OperationName, 'targetId', AgentSP, 'targetRole', 'Unresolved; inspect audit payload', 'assessment', 'Permission configuration audit; risk not established')),
+          CorrelationQuality = 'configuration', AccountCustomEntity = ActorUPN

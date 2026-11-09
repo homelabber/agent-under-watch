@@ -1,0 +1,36 @@
+// Uses observed BotId even when unregistered; inventory only enriches registration status.
+let Agents = _GetWatchlist('AIAgentInventory')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId))
+    | where isnotempty(AgentId) | distinct AgentId
+    | extend RegistrationStatus = 'Registered';
+let Approved = _GetWatchlist('AIAgentApprovedMakers')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project ActorUPN = tolower(tostring(ActorUPN)), ApprovedEnvironment = tolower(tostring(EnvironmentId))
+    | where isnotempty(ActorUPN) and isnotempty(ApprovedEnvironment);
+let Events = PowerPlatformAdminActivity
+    | where TimeGenerated >= ago(1h)
+    | where EventResult == 'Succeeded'
+    | where EventOriginalType in ('BotCreate', 'BotUpdateOperation-BotPublish')
+    | extend AgentId = tolower(coalesce(tostring(Properties.BotId), tostring(PropertyCollection.BotId))),
+             ActorUPN = tolower(tostring(ActorName)), Environment = tolower(tostring(EnvironmentId))
+    | where isnotempty(AgentId) and ActorUPN contains '@' and isnotempty(Environment) and isnotempty(EventOriginalUid)
+    | summarize arg_max(TimeGenerated, *) by EventOriginalUid
+    | join kind=leftouter Agents on AgentId
+    | extend RegistrationStatus = coalesce(RegistrationStatus, 'Unknown');
+let Created = Events | where EventOriginalType == 'BotCreate'
+    | project AgentId, ActorUPN, Environment, CreatedAt = TimeGenerated, CreateEventId = tostring(EventOriginalUid);
+let Published = Events | where EventOriginalType == 'BotUpdateOperation-BotPublish'
+    | project AgentId, ActorUPN, Environment, RegistrationStatus, PublishedAt = TimeGenerated, PublishEventId = tostring(EventOriginalUid);
+let ExactApproval = Approved | where ApprovedEnvironment != '*'
+    | project ActorUPN, Environment = ApprovedEnvironment;
+let GlobalApproval = Approved | where ApprovedEnvironment == '*' | distinct ActorUPN;
+Created
+| join kind=inner Published on AgentId, ActorUPN, Environment
+| where PublishedAt >= CreatedAt and PublishedAt <= CreatedAt + 30m
+| join kind=leftanti ExactApproval on ActorUPN, Environment
+| join kind=leftanti GlobalApproval on ActorUPN
+| summarize arg_max(CreatedAt, *) by AgentId, ActorUPN, Environment, PublishEventId
+| project TimeGenerated = PublishedAt, AgentId, ActorUPN, EnvironmentId = Environment, RegistrationStatus,
+          Evidence = tostring(bag_pack('createEventId', CreateEventId, 'publishEventId', PublishEventId, 'createdAt', CreatedAt, 'publishedAt', PublishedAt)),
+          CorrelationQuality = 'exact', AccountCustomEntity = ActorUPN

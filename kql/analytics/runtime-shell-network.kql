@@ -1,0 +1,31 @@
+let Agents = _GetWatchlist('AIAgentInventory')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId))
+    | where isnotempty(AgentId) | distinct AgentId;
+let Runtimes = _GetWatchlist('AIAgentRuntimeInventory')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId)), DeviceId = tolower(tostring(DeviceId)),
+              RuntimeFile = tolower(tostring(ProcessFileName)), RuntimeFolder = tolower(tostring(ProcessFolderPath))
+    | where isnotempty(AgentId) and isnotempty(DeviceId) and isnotempty(RuntimeFile) and isnotempty(RuntimeFolder)
+    | join kind=inner Agents on AgentId
+    | distinct AgentId, DeviceId, RuntimeFile, RuntimeFolder;
+let Children = DeviceProcessEvents
+    | where TimeGenerated >= ago(1h) and ActionType == 'ProcessCreated'
+    | where FileName in~ ('powershell.exe', 'pwsh.exe', 'cmd.exe', 'wscript.exe', 'cscript.exe', 'mshta.exe', 'bash.exe', 'sh.exe')
+    | extend DeviceId = tolower(DeviceId), RuntimeFile = tolower(InitiatingProcessFileName), RuntimeFolder = tolower(InitiatingProcessFolderPath)
+    | join kind=inner Runtimes on DeviceId, RuntimeFile, RuntimeFolder
+    | project AgentId, DeviceId, DeviceName, ChildAt = TimeGenerated, ChildPid = ProcessId,
+              ChildCreated = ProcessCreationTime, ChildFile = FileName, ActorUPN = tolower(AccountUpn), ProcessReportId = ReportId
+    | where isnotnull(ChildCreated)
+    | distinct AgentId, DeviceId, DeviceName, ChildAt, ChildPid, ChildCreated, ChildFile, ActorUPN, ProcessReportId;
+let Connections = DeviceNetworkEvents
+    | where TimeGenerated >= ago(1h) and ActionType == 'ConnectionSuccess'
+    | project DeviceId = tolower(DeviceId), ChildPid = InitiatingProcessId, ChildCreated = InitiatingProcessCreationTime,
+              NetworkAt = TimeGenerated, RemoteIP, RemotePort, RemoteUrl, NetworkReportId = ReportId;
+Children
+| join kind=inner Connections on DeviceId, ChildPid, ChildCreated
+| where NetworkAt >= ChildAt and NetworkAt <= ChildAt + 10m
+| summarize arg_min(NetworkAt, *) by AgentId, DeviceId, ChildPid, ChildCreated, ProcessReportId
+| project TimeGenerated = NetworkAt, AgentId, ActorUPN, DeviceId,
+          Evidence = tostring(bag_pack('processReportId', ProcessReportId, 'networkReportId', NetworkReportId, 'childFile', ChildFile, 'childPid', ChildPid, 'childCreated', ChildCreated, 'remoteHost', RemoteUrl, 'remoteIP', RemoteIP, 'remotePort', RemotePort)),
+          CorrelationQuality = 'heuristic', HostCustomEntity = DeviceName, AccountCustomEntity = ActorUPN, IPCustomEntity = RemoteIP

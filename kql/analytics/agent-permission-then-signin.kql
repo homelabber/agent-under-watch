@@ -1,0 +1,30 @@
+// A successful sign-in does not prove use of the audited permission or access to data.
+let Agents = _GetWatchlist('AIAgentInventory')
+    | where tolower(tostring(Enabled)) == 'true'
+    | project AgentId = tolower(tostring(AgentId)), AgentSP = tolower(tostring(ServicePrincipalObjectId))
+    | where isnotempty(AgentId) and isnotempty(AgentSP)
+    | distinct AgentId, AgentSP;
+let Grants = AuditLogs
+    | where TimeGenerated >= ago(1h) and Result =~ 'success'
+    | where OperationName in~ ('Add app role assignment to service principal', 'Add delegated permission grant')
+    | where isnotempty(Id)
+    | summarize arg_max(TimeGenerated, *) by Id
+    | mv-expand Target = TargetResources
+    | extend AgentSP = tolower(tostring(Target.id)), ActorUPN = tolower(tostring(InitiatedBy.user.userPrincipalName))
+    | where tostring(Target.type) =~ 'ServicePrincipal' and isnotempty(AgentSP)
+    | join kind=inner Agents on AgentSP
+    | project AgentId, AgentSP, ActorUPN, GrantAt = TimeGenerated, AuditId = Id, OperationName
+    | distinct AgentId, AgentSP, ActorUPN, GrantAt, AuditId, OperationName;
+let SignIns = AADServicePrincipalSignInLogs
+    | where TimeGenerated >= ago(1h) and tostring(ResultType) == '0'
+    | where isnotempty(Id) and isnotempty(ServicePrincipalId)
+    | summarize arg_max(TimeGenerated, *) by Id
+    | project AgentSP = tolower(tostring(ServicePrincipalId)), SignInAt = TimeGenerated,
+              SignInId = Id, IPAddress, ResourceDisplayName;
+Grants
+| join kind=inner SignIns on AgentSP
+| where SignInAt >= GrantAt and SignInAt <= GrantAt + 30m
+| summarize arg_max(GrantAt, *) by AgentId, AgentSP, SignInId
+| project TimeGenerated = SignInAt, AgentId, ActorUPN, ServicePrincipalObjectId = AgentSP,
+          Evidence = tostring(bag_pack('auditId', AuditId, 'operation', OperationName, 'grantAt', GrantAt, 'signInId', SignInId, 'resource', ResourceDisplayName, 'assessment', 'Identity-targeted permission audit followed by authentication; permission use not proven')),
+          CorrelationQuality = 'heuristic', AccountCustomEntity = ActorUPN, IPCustomEntity = IPAddress

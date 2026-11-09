@@ -1,0 +1,24 @@
+name: Validate preview content
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build generated content
+        run: python -B tools\build_content.py
+      - name: Run offline tests
+        run: python -B -m unittest discover -s tests -v
+      - name: Check generated content is current
+        run: git diff --exit-code -- arm workbooks preview

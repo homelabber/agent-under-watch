@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string"
+    },
+    "enableRule": {
+      "type": "bool",
+      "defaultValue": false
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2024-03-01",
+      "kind": "Scheduled",
+      "name": "[format('{0}/Microsoft.SecurityInsights/e46a3781-60c5-470c-b3c8-823ae94ff214', parameters('workspaceName'))]",
+      "properties": {
+        "description": "Successful Copilot Studio BotAuthUpdate on a known enabled agent; reports configuration change without asserting weakened authentication.",
+        "severity": "Low",
+        "queryFrequency": "PT15M",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "tactics": [],
+        "displayName": "AI Agent | Registered agent authentication configuration changed",
+        "query": "let Agents = _GetWatchlist('AIAgentInventory')\n    | where tolower(tostring(Enabled)) == 'true'\n    | project AgentId = tolower(tostring(AgentId))\n    | where isnotempty(AgentId) | distinct AgentId;\nPowerPlatformAdminActivity\n| where TimeGenerated >= ago(1h)\n| where EventOriginalType == 'BotUpdateOperation-BotAuthUpdate' and EventResult == 'Succeeded'\n| extend AgentId = tolower(coalesce(tostring(Properties.BotId), tostring(PropertyCollection.BotId))),\n         ActorUPN = iff(tostring(ActorName) contains '@', tolower(tostring(ActorName)), '')\n| where isnotempty(AgentId) and isnotempty(EventOriginalUid)\n| summarize arg_max(TimeGenerated, *) by EventOriginalUid\n| join kind=inner Agents on AgentId\n| project TimeGenerated, AgentId, ActorUPN, EnvironmentId,\n          Evidence = tostring(bag_pack('eventId', EventOriginalUid, 'operation', EventOriginalType, 'actorId', ActorUserId, 'assessment', 'Authentication configuration changed; weakening not established')),\n          CorrelationQuality = 'configuration', AccountCustomEntity = ActorUPN\n",
+        "enabled": "[parameters('enableRule')]",
+        "suppressionDuration": "PT1H",
+        "suppressionEnabled": false,
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": false
+          }
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "SingleAlert"
+        },
+        "customDetails": {
+          "AgentId": "AgentId",
+          "CorrelationQuality": "CorrelationQuality"
+        }
+      }
+    }
+  ]
+}
